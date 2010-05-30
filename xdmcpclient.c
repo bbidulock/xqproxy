@@ -185,6 +185,7 @@ XdmcpClientRegisterServer (XdmcpClient *client, const char *host, const char *po
     struct addrinfo hints;
     struct addrinfo *res;
     int error;
+    int sock;
 
     memset (&hints, 0, sizeof (hints));
     hints.ai_family = PF_UNSPEC;
@@ -197,7 +198,7 @@ XdmcpClientRegisterServer (XdmcpClient *client, const char *host, const char *po
 	while (res)
     {
         /* TODO: Somehow gdm does not response on IPv6? will figure it out later */
-	    if (res->ai_family == AF_INET)
+	    if (res->ai_family == AF_INET || res->ai_family == AF_INET6)
         {
 		    break;
         }
@@ -212,6 +213,14 @@ XdmcpClientRegisterServer (XdmcpClient *client, const char *host, const char *po
     memmove (&client->Addr, res->ai_addr, res->ai_addrlen);
     client->AddrLen = res->ai_addrlen;
 
+    sock = socket (res->ai_family, SOCK_DGRAM, 0);
+    if (sock < 0)
+    {
+        printf ("Error> failed to create socket.\n");
+        return FALSE;
+    }
+    client->Sock = sock;
+
     printf ("Client> Server address %s:%s registered.\n", host, port);
 
     return TRUE;
@@ -221,18 +230,10 @@ XdmcpClient*
 XdmcpClientNew (int display_number, int timeout)
 {
     XdmcpClient *client;
-    int sock;
-
-    sock = socket (AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-    {
-        printf ("Error> failed to create socket.\n");
-        return NULL;
-    }
 
     client = (XdmcpClient*) malloc (sizeof (XdmcpClient));
     memset (client, 0, sizeof (XdmcpClient));
-    client->Sock = sock;
+    client->Sock = -1;
     client->Timeout = timeout;
 
     XdmcpClientRegisterAuthen (client, "XDM-AUTHENTICATION-1", "test", 4);
@@ -250,7 +251,7 @@ XdmcpClientNew (int display_number, int timeout)
 void
 XdmcpClientFree (XdmcpClient *client)
 {
-    if (client->Sock > 0)
+    if (client->Sock >= 0)
     {
         close (client->Sock);
     }
