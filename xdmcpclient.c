@@ -100,8 +100,8 @@ struct _XdmcpClient
     int Sock;
     int Timeout;
 
-    XdmcpHeader	header;
-    XdmcpBuffer	buffer;
+    XdmcpHeader header;
+    XdmcpBuffer buffer;
 
     ARRAYofARRAY8 AuthenNames;
     ARRAYofARRAY8 AuthenDatas;
@@ -184,6 +184,7 @@ XdmcpClientRegisterServer (XdmcpClient *client, const char *host, const char *po
 {
     struct addrinfo hints;
     struct addrinfo *res;
+    struct addrinfo *resi;
     int error;
     int sock;
 
@@ -195,31 +196,31 @@ XdmcpClientRegisterServer (XdmcpClient *client, const char *host, const char *po
         printf ("Error> getaddrinfo on %s:%s failed: %s.\n", host, port, gai_strerror (error));
         return FALSE;
     }
-	while (res)
+    for (resi = res; resi; resi = resi->ai_next)
     {
-        /* TODO: Somehow gdm does not response on IPv6? will figure it out later */
-	    if (res->ai_family == AF_INET || res->ai_family == AF_INET6)
+        if (resi->ai_family == AF_INET || resi->ai_family == AF_INET6)
         {
-		    break;
+            break;
         }
-        res = res->ai_next;
-	}
-	if (res == NULL)
+    }
+    if (resi == NULL)
     {
         printf ("Error> host not on supported network type.\n");
         return FALSE;
     }
 
-    memmove (&client->Addr, res->ai_addr, res->ai_addrlen);
-    client->AddrLen = res->ai_addrlen;
+    memmove (&client->Addr, resi->ai_addr, resi->ai_addrlen);
+    client->AddrLen = resi->ai_addrlen;
 
-    sock = socket (res->ai_family, SOCK_DGRAM, 0);
+    sock = socket (resi->ai_family, SOCK_DGRAM, 0);
     if (sock < 0)
     {
         printf ("Error> failed to create socket.\n");
         return FALSE;
     }
     client->Sock = sock;
+
+    freeaddrinfo (res);
 
     printf ("Client> Server address %s:%s registered.\n", host, port);
 
@@ -258,6 +259,12 @@ XdmcpClientFree (XdmcpClient *client)
     XdmcpDisposeARRAYofARRAY8 (&client->AuthenNames);
     XdmcpDisposeARRAYofARRAY8 (&client->AuthenDatas);
     XdmcpDisposeARRAYofARRAY8 (&client->AuthorNames);
+    XdmcpDisposeARRAY8 (&client->AuthorName);
+    XdmcpDisposeARRAY8 (&client->AuthorData);
+    XdmcpDisposeARRAY8 (&client->DisplayClass);
+    XdmcpDisposeARRAY8 (&client->DisplayID);
+    if (client->buffer.data)
+        Xfree (client->buffer.data);
     free (client);
 }
 
@@ -301,12 +308,12 @@ XdmcpClientReceivePacket (XdmcpClient *client)
     if (!XdmcpReadHeader (&client->buffer, &client->header))
     {
         printf ("Error> Received corrupted packet header.\n");
-    	return FALSE;
+        return FALSE;
     }
     if (client->header.version != XDM_PROTOCOL_VERSION)
     {
         printf ("Error> Received unsupported version %i.\n", client->header.version);
-	    return FALSE;
+        return FALSE;
     }
     return TRUE;
 }
