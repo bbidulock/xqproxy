@@ -1,0 +1,19 @@
+#!/bin/sh
+# Usage: xqssh <server> <local_display_number>
+SSH=$(which ssh)
+if [ "x$SSH" = "x" ]; then
+    echo openssh is required in order to use xqssh.
+    exit 1
+fi
+QUERY=$(ssh $1 xqproxy -display $2 -query)
+echo "$QUERY"
+SESSIONID=$(echo "$QUERY" | awk '/ACCEPT/ {print substr($3,12)}')
+COOKIE=$(echo "$QUERY" | awk '/ACCEPT/ {print substr($7,12,32)}')
+if [ "x$SESSIONID" = "x" ] || [ "x$COOKIE" = "x" ]; then
+    exit 1
+fi
+xauth add :$2 MIT-MAGIC-COOKIE-1 $COOKIE
+PORT=$(expr 6000 + $2)
+ssh -R $PORT:localhost:$PORT -fN $1
+ssh $1 xqproxy -display $2 -manage -sessionid $SESSIONID
+exit 0

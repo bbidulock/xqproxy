@@ -1,0 +1,144 @@
+.\" Copyright (c) 2009 Vic Lee
+.\"
+.\" Permission is hereby granted, free of charge, to any person
+.\" obtaining a copy of this software and associated documentation
+.\" files (the "Software"), to deal in the Software without
+.\" restriction, including without limitation the rights to use,
+.\" copy, modify, merge, publish, distribute, sublicense, and/or sell
+.\" copies of the Software, and to permit persons to whom the
+.\" Software is furnished to do so, subject to the following
+.\" conditions:
+.\"
+.\" The above copyright notice and this permission notice shall be
+.\" included in all copies or substantial portions of the Software.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+.\" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+.\" OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+.\" NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+.\" HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+.\" WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+.\" FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+.\" OTHER DEALINGS IN THE SOFTWARE.
+.\"
+.de EX		\"Begin example
+.ne 5
+.if n .sp 1
+.if t .sp .5
+.nf
+.in +.5i
+..
+.de EE
+.fi
+.in -.5i
+.if n .sp 1
+.if t .sp .5
+..
+.TH XQPROXY 1 __xorgversion__
+.SH NAME
+xqproxy \- XDMCP Query Proxy
+.SH SYNOPSIS
+.B xqproxy
+[-display n] [-host hostname] [-port port] [-timeout seconds] [-query [-xauth]]
+[-manage [-sessionid session-id]]
+.SH DESCRIPTION
+.I xqproxy
+is a proxy program that can send XDMCP query to a display manager to establish
+XDM session for an existing local X display.
+.SH OPTIONS
+.PP
+.TP 8
+.B \-display n
+The local display number. Default is 0.
+.PP
+.TP 8
+.B \-host hostname
+The hostname of the remote display manager. Default is localhost.
+.PP
+.TP 8
+.B \-port port
+The XDMCP UDP port of the remote display manager. Default is 177.
+.PP
+.TP 8
+.B \-timeout seconds
+Timeout value while waiting for response from the server.
+.PP
+.TP 8
+.B \-query
+Sends QUERY and REQUEST to the display manager to request a new session. The
+session id and magic cookie will be printed in stdout.
+.PP
+.TP 8
+.B \-xauth
+When use together with -query option, xqproxy will call xauth to add the magic
+cookie to local .Xauthority database.
+.PP
+.TP 8
+.B \-manage
+Sends MANAGE to the display manager to start the session. If this option is
+used together with -query, it will always use the session id returned from the
+display manager. Otherwise, it will uses the session id assigned by -sessionid
+argument.
+.PP
+.TP 8
+.B \-sessionid session-id
+The new session id returned from the display manager. This option is useful
+only if -manage option is used separately.
+.SH EXAMPLES
+.PP
+The following command request the display manager on REMOTEHOST to establish
+an XDM session directly to a local X server on display :1 :
+.PP
+	xqproxy -display 1 -host \fIREMOTEHOST\fP -query -xauth -manage
+.PP
+The following shell script request the display manager supplied by the first
+argument to establish an XDM session over a secure SSH tunnel on a local
+display supplied by the second argument (note that xqproxy runs on the server)
+:
+.PP
+	#!/bin/sh
+.br
+	# Usage: xqssh <server> <local_display_number>
+.br
+	SSH=$(which ssh)
+.br
+	if [ "x$SSH" = "x" ]; then
+.br
+	    echo openssh is required in order to use xqssh.
+.br
+	    exit 1
+.br
+	fi
+.br
+	QUERY=$(ssh $1 xqproxy -display $2 -query)
+.br
+	echo "$QUERY"
+.br
+	SESSIONID=$(echo "$QUERY" | awk '/ACCEPT/ {print substr($3,12)}')
+.br
+	COOKIE=$(echo "$QUERY" | awk '/ACCEPT/ {print substr($7,12,32)}')
+.br
+	if [ "x$SESSIONID" = "x" ] || [ "x$COOKIE" = "x" ]; then
+.br
+	    exit 1
+.br
+	fi
+.br
+	xauth add :$2 MIT-MAGIC-COOKIE-1 $COOKIE
+.br
+	PORT=$(expr 6000 + $2)
+.br
+	ssh -R $PORT:localhost:$PORT -fN $1
+.br
+	ssh $1 xqproxy -display $2 -manage -sessionid $SESSIONID
+.br
+	exit 0
+.PP
+.SH "SEE ALSO"
+ssh(1)
+.SH BUGS
+.PP
+Please send bugs to Vic Lee <llyzs@163.com>
+.SH AUTHORS
+Vic Lee
+

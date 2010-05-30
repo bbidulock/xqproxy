@@ -1,0 +1,8 @@
+This package contains the following binary executable:
+
+xqproxy - XDMCP Query Proxy
+
+Please see man pages for more information.
+
+To compile on Debian, you need libxdmcp-dev package installed.
+
