@@ -23,7 +23,7 @@ if test "x$GCC" = "xyes"; then
 fi
 
 PKG_CHECK_MODULES(libxdmcp, [
-        xdmcp >= 1.0.0
+        xdmcp >= 1.0.0 x11
 ])
 AC_SUBST(libxdmcp_LIBS)
 AC_SUBST(libxdmcp_CFLAGS)

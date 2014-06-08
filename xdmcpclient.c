@@ -264,7 +264,7 @@ XdmcpClientFree (XdmcpClient *client)
     XdmcpDisposeARRAY8 (&client->DisplayClass);
     XdmcpDisposeARRAY8 (&client->DisplayID);
     if (client->buffer.data)
-        Xfree (client->buffer.data);
+        XFree (client->buffer.data);
     free (client);
 }
 
