@@ -29,6 +29,12 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <ifaddrs.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <arpa/inet.h>
+#include <X11/X.h>
 #include <X11/Xdmcp.h>
 #include "xdmcpclient.h"
 
@@ -264,7 +270,7 @@ XdmcpClientFree (XdmcpClient *client)
     XdmcpDisposeARRAY8 (&client->DisplayClass);
     XdmcpDisposeARRAY8 (&client->DisplayID);
     if (client->buffer.data)
-        XFree (client->buffer.data);
+        free (client->buffer.data);
     free (client);
 }
 
@@ -441,31 +447,173 @@ XdmcpClientRequest (XdmcpClient *client)
 {
     int ret;
     ARRAY8  AcceptAuthenName = { 0 }, AcceptAuthenData = { 0 };
+    int connections = 0, connaddrlen = 0, loopback = 0;
+    struct ifaddrs *ifa, *ifas = NULL;
+    char addrbuf[INET6_ADDRSTRLEN];
+
+    if (getifaddrs (&ifas) != 0)
+	return FALSE;
+
+    for (ifa = ifas; ifa; ifa = ifa->ifa_next) {
+	switch (ifa->ifa_addr->sa_family) {
+	case AF_INET:
+	{
+	    struct sockaddr_in *sin = (typeof(sin))ifa->ifa_addr;
+	    int ipv4ll = ((ntohl(sin->sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000);
+
+	    if ((ifa->ifa_flags & IFF_LOOPBACK) || ipv4ll)
+		continue;
+	    connections++;
+	    connaddrlen += sizeof(CARD16) + sizeof(sin->sin_addr);
+	    printf ("Client> connection %d address %s\n", connections,
+		    inet_ntop(AF_INET, &sin->sin_addr, addrbuf, INET_ADDRSTRLEN));
+	    break;
+	}
+	case AF_INET6:
+	{
+	    struct sockaddr_in6 *sin6 = (typeof(sin6))ifa->ifa_addr;
+	    int ipv6ll = (sin6->sin6_scope_id != 0);
+
+	    if ((ifa->ifa_flags & IFF_LOOPBACK) || ipv6ll)
+		continue;
+	    connections++;
+	    connaddrlen += sizeof(CARD16) + sizeof(sin6->sin6_addr);
+	    printf ("Client> connection %d address %s\n", connections,
+		    inet_ntop(AF_INET6, &sin6->sin6_addr, addrbuf, INET6_ADDRSTRLEN));
+	    break;
+	}
+	default:
+	    continue;
+	}
+    }
+    if (!connections) {
+	loopback = 1;
+	for (ifa = ifas; ifa; ifa = ifa->ifa_next) {
+	    switch (ifa->ifa_addr->sa_family) {
+	    case AF_INET:
+	    {
+		struct sockaddr_in *sin = (typeof(sin))ifa->ifa_addr;
+		int ipv4ll = ((ntohl(sin->sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000);
+
+		if (!(ifa->ifa_flags & IFF_LOOPBACK) && !ipv4ll)
+		    continue;
+		connections++;
+		connaddrlen += sizeof(CARD16) + sizeof(sin->sin_addr);
+		printf ("Client> connection %d address %s\n", connections,
+			inet_ntop(AF_INET, &sin->sin_addr, addrbuf, INET_ADDRSTRLEN));
+		break;
+	    }
+	    case AF_INET6:
+	    {
+		struct sockaddr_in6 *sin6 = (typeof(sin6))ifa->ifa_addr;
+		int ipv6ll = (sin6->sin6_scope_id != 0);
+
+		if (!(ifa->ifa_flags & IFF_LOOPBACK) && !ipv6ll)
+		    continue;
+		connections++;
+		connaddrlen += sizeof(CARD16) + sizeof(sin6->sin6_addr);
+		printf ("Client> connection %d address %s\n", connections,
+			inet_ntop(AF_INET6, &sin6->sin6_addr, addrbuf, INET6_ADDRSTRLEN));
+		break;
+	    }
+	    default:
+		continue;
+	    }
+	}
+    }
+    if (!connections)
+	return FALSE;
 
     client->header.version = XDM_PROTOCOL_VERSION;
     client->header.opcode = (CARD16) REQUEST; 
 
-    client->header.length = 2; /* display number */
+    client->header.length = sizeof(CARD16); /* display number */
     /* TODO: Connection Types */
-    client->header.length += 1 + 2 * 0; /* connection types */
+    client->header.length += 1 + sizeof(CARD16) * connections; /* connection types */
     client->header.length += 1; /* connection addresses */
-    /* for each connection type, += 2 + data.length */
-    client->header.length += 2 + client->AuthenName.length;
-    client->header.length += 2 + client->AuthenData.length;
+    client->header.length += connaddrlen;
+    /* for each connection type, += sizeof(CARD16) + data.length */
+    client->header.length += sizeof(CARD16) + client->AuthenName.length;
+    client->header.length += sizeof(CARD16) + client->AuthenData.length;
     client->header.length += 1; /* authorization names */
     client->header.length += ARRAY8ofARRAY8Len (&client->AuthorNames);
-    client->header.length += 2 + client->DisplayID.length;
+    client->header.length += sizeof(CARD16) + client->DisplayID.length;
 
     XdmcpWriteHeader (&client->buffer, &client->header);
     XdmcpWriteCARD16 (&client->buffer, (CARD16) client->DisplayNumber);
-    XdmcpWriteCARD8 (&client->buffer, (CARD8) 0);
     /* connection types here */
-    XdmcpWriteCARD8 (&client->buffer, (CARD8) 0);
+    XdmcpWriteCARD8 (&client->buffer, (CARD8) connections);
+    for (ifa = ifas; ifa; ifa = ifa->ifa_next) {
+	CARD16 connectionType;
+	switch (ifa->ifa_addr->sa_family) {
+	case AF_INET:
+	{
+	    struct sockaddr_in *sin = (typeof(sin))ifa->ifa_addr;
+	    int ipv4ll = ((ntohl(sin->sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000);
+
+	    if ((!loopback && ((ifa->ifa_flags & IFF_LOOPBACK) || ipv4ll)) ||
+		(loopback && (!(ifa->ifa_flags & IFF_LOOPBACK) && !ipv4ll)))
+		continue;
+	    connectionType = FamilyInternet;
+	    break;
+	}
+	case AF_INET6:
+	{
+	    struct sockaddr_in6 *sin6 = (typeof(sin6))ifa->ifa_addr;
+	    int ipv6ll = (sin6->sin6_scope_id != 0);
+
+	    if ((!loopback && ((ifa->ifa_flags & IFF_LOOPBACK) || ipv6ll)) ||
+		(loopback && (!(ifa->ifa_flags & IFF_LOOPBACK) && !ipv6ll)))
+		continue;
+	    connectionType = FamilyInternet6;
+	    break;
+	}
+	default:
+	    continue;
+	}
+	XdmcpWriteCARD16 (&client->buffer, connectionType);
+    }
+    XdmcpWriteCARD8 (&client->buffer, (CARD8) connections);
     /* connection addresses here */
+    for (ifa = ifas; ifa; ifa = ifa->ifa_next) {
+	ARRAY8 connectionAddress;
+
+	switch (ifa->ifa_addr->sa_family) {
+	case AF_INET:
+	{
+	    struct sockaddr_in *sin = (typeof(sin))ifa->ifa_addr;
+	    int ipv4ll = ((ntohl(sin->sin_addr.s_addr) & 0xffff0000) == 0xa9fe0000);
+
+	    if ((!loopback && ((ifa->ifa_flags & IFF_LOOPBACK) || ipv4ll)) ||
+		(loopback && (!(ifa->ifa_flags & IFF_LOOPBACK) && !ipv4ll)))
+		continue;
+	    connectionAddress.length = sizeof(sin->sin_addr);
+	    connectionAddress.data = (CARD8 *) &sin->sin_addr;
+	    break;
+	}
+	case AF_INET6:
+	{
+	    struct sockaddr_in6 *sin6 = (typeof(sin6))ifa->ifa_addr;
+	    int ipv6ll = (sin6->sin6_scope_id != 0);
+
+	    if ((!loopback && ((ifa->ifa_flags & IFF_LOOPBACK) || ipv6ll)) ||
+		(loopback && (!(ifa->ifa_flags & IFF_LOOPBACK) && !ipv6ll)))
+		continue;
+	    connectionAddress.length = sizeof(sin6->sin6_addr);
+	    connectionAddress.data = (CARD8 *) &sin6->sin6_addr;
+	    break;
+	}
+	default:
+	    continue;
+	}
+	XdmcpWriteARRAY8 (&client->buffer, &connectionAddress);
+    }
     XdmcpWriteARRAY8 (&client->buffer, &client->AuthenName);
     XdmcpWriteARRAY8 (&client->buffer, &client->AuthenData);
     XdmcpWriteARRAYofARRAY8 (&client->buffer, &client->AuthorNames);
     XdmcpWriteARRAY8 (&client->buffer, &client->DisplayID);
+
+    freeifaddrs (ifas);
 
     XdmcpFlush (client->Sock, &client->buffer, (XdmcpNetaddr) &client->Addr, client->AddrLen);
 

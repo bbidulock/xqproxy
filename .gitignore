@@ -18,3 +18,5 @@ stamp-h1
 *.o
 xqproxy.1
 xqproxy
+.*.sw[nop]
+compile
